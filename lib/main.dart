@@ -49,6 +49,41 @@ class _EmailSyncPageState extends State<EmailSyncPage> {
   // Lists to store data
   SyncStatus? _syncStatus;
   List<EmailDocument> _emails = [];
+  ScrollController _scrollController = ScrollController();
+  bool _isFirstLoad = true;
+
+  String _formatDateTime(String dateTimeStr) {
+    final date = DateTime.parse(dateTimeStr);
+
+    // Get month name
+    final months = [
+      'January',
+      'February',
+      'March',
+      'April',
+      'May',
+      'June',
+      'July',
+      'August',
+      'September',
+      'October',
+      'November',
+      'December'
+    ];
+    final monthName = months[date.month - 1];
+
+    // Format hour for 12-hour clock
+    int hour = date.hour % 12;
+    if (hour == 0) hour = 12; // 0 should be displayed as 12 in 12-hour format
+
+    // Add leading zeros to minutes
+    final minutes = date.minute.toString().padLeft(2, '0');
+
+    // AM/PM indicator
+    final period = date.hour < 12 ? 'am' : 'pm';
+
+    return '${date.day} $monthName ${date.year} $hour:$minutes $period';
+  }
 
   @override
   void initState() {
@@ -60,6 +95,7 @@ class _EmailSyncPageState extends State<EmailSyncPage> {
   void dispose() {
     _tokenController.dispose();
     _emailController.dispose();
+    _scrollController.dispose();
     super.dispose();
   }
 
@@ -78,6 +114,7 @@ class _EmailSyncPageState extends State<EmailSyncPage> {
       _syncId = null;
       _syncStatus = null;
       _emails = [];
+      _isFirstLoad = true;
     });
 
     try {
@@ -124,14 +161,30 @@ class _EmailSyncPageState extends State<EmailSyncPage> {
     // Listen to sync collection
     _service.listenToSyncCollection(_syncId!).listen((emails) {
       if (mounted) {
-        setState(() {
-          _emails = emails;
-        });
+        _updateEmails(emails);
       }
     }, onError: (error) {
       if (mounted) {
         setState(() {
           _errorMessage = 'Firestore error: ${error.toString()}';
+        });
+      }
+    });
+  }
+
+  void _updateEmails(List<EmailDocument> newEmails) {
+    setState(() {
+      _emails = newEmails;
+
+      // Only scroll to bottom on first load
+      if (_isFirstLoad && _emails.isNotEmpty) {
+        _isFirstLoad = false;
+        // Use a post-frame callback to ensure the list has been built
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (_scrollController.hasClients) {
+            _scrollController
+                .jumpTo(_scrollController.position.maxScrollExtent);
+          }
         });
       }
     });
@@ -248,6 +301,8 @@ class _EmailSyncPageState extends State<EmailSyncPage> {
                       const Divider(),
                       Expanded(
                         child: ListView.builder(
+                          controller: _scrollController,
+                          reverse: true,
                           itemCount: _emails.length,
                           itemBuilder: (context, index) {
                             final email = _emails[index];
@@ -258,6 +313,19 @@ class _EmailSyncPageState extends State<EmailSyncPage> {
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
+                                    Text(
+                                      email.data['email_date'] == null
+                                          ? 'No Date'
+                                          : _formatDateTime(
+                                              email.data['email_date']),
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .titleMedium
+                                          ?.copyWith(
+                                            fontWeight: FontWeight.bold,
+                                            color: Colors.red,
+                                          ),
+                                    ),
                                     Text(
                                       email.data['subject'] ?? 'No Subject',
                                       style: Theme.of(context)
